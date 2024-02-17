@@ -1,0 +1,757 @@
+---
+title: "Final-Clean"
+author: "Kelsey King"
+date: "2024-02-17"
+output: html_document
+---
+# Introduction
+The following code pertains to the manuscript "Fecundity without nectar is insufficient for persistence of a blue butterfly" by Kelsey C. King and Cheryl B. Schultz.
+
+Loading various libraries
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(dplyr)
+library(lme4)
+library(MASS)
+library(car)
+library(emmeans)
+library(forcats)
+library(glm.predict)
+#If you need to install bootpredictlme4 use code in hashtag below
+#require("remotes")
+#remotes::install_github("RemkoDuursma/bootpredictlme4")
+library(bootpredictlme4)
+
+#from Dealing with quasi- models in R by Ben Bolker (2023) https://cran.r-project.org/web/packages/bbmle/vignettes/quasi.pdf
+#function for glms
+dfun <- function(object) {
+with(object,sum((weights * residuals^2)[weights > 0])/df.residual)
+}
+#from Ben Bolkder's Mixed Model Extensions 
+#https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#testing-for-overdispersioncomputing-overdispersion-factor
+#function for testing for overdispersion in glmer models
+overdisp_fun <- function(model) {
+    rdf <- df.residual(model)
+    rp <- residuals(model,type="pearson")
+    Pearson.chisq <- sum(rp^2)
+    prat <- Pearson.chisq/rdf
+    pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+    c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+```
+
+# Sugar Experiment
+Please reference the manuscript for details on the treatments.
+```{r}
+#summary data of adults
+exp.adults=read.csv("./Adults2019_Puget.csv",stringsAsFactors = TRUE)
+
+#daily egg laying of adults
+laid.eggs=read.csv("./DailyFec2019_Puget.csv",stringsAsFactors = TRUE)
+
+#removing individuals that do not meet criteria and loading other data
+exp.adults=exp.adults[!(exp.adults$Indi=="A5"|exp.adults$Indi=="A10"),]
+laid.eggs=laid.eggs[!(exp.adults$Indi=="A5"|exp.adults$Indi=="A10"),]
+
+#dissection data with counts of unlaid eggs
+dissect=read.csv("./Dissect2019_Puget.csv",stringsAsFactors = TRUE)
+dissect=dissect[!(dissect$Indi=="A5"|dissect$Indi=="A10"|dissect$Indi=="A9"),]
+
+#weight measurements of adults throughout experiment
+weight=read.csv("./Weights2019_Puget.csv",stringsAsFactors = TRUE)
+weight=weight[!(weight$Indi=="A5"|weight$Indi=="A10"),]
+
+#details needed throughout this experiment
+#Experimental title, colors, treatment labels etc.
+#days of interest in daily fecundity and weight data
+exp.title=c("Sugar")
+exp.days1=c(1,3,5,10,18)
+exp.days2=c(1,3,5,11,17)
+t.names=c("A", "R", "W")
+t.colors=c("#27eb5a","#eb5a27","#5a27eb")
+t.labs=c('Ad Libitum', 'Restricted', 'Water Only')
+```
+
+## Total Fecundity
+We used the same process to evaluate the Sugar and Amino Acids experimental models as used below, and will not repeat that code below, for reference review each model here.
+```{r}
+#total fecundity is the sum of all eggs laid by each female
+tot.fec=glm(Total.Fecundity ~ Treat, data=exp.adults, family="poisson")
+tot.fec.q=glm(Total.Fecundity ~ Treat, data=exp.adults, family="quasipoisson")
+summary(tot.fec.q)
+#overdispersed
+
+#other model fits, testing AIC
+tot.fec.nb=glm.nb(Total.Fecundity ~ Treat, data=exp.adults)
+bbmle::qAIC(tot.fec.nb, dispersion= dfun(tot.fec.nb), nobs=nrow(exp.adults))
+#qAIC here uses the dispersion calculated to adjust the Poisson model, e.g. what is the AIC if we adjust the Poisson model to be a quasi-Poisson
+bbmle::qAIC(tot.fec,dispersion=dfun(tot.fec),nobs=nrow(exp.adults))
+#quasipoisson performing better than glm.nb
+
+tot.fec=tot.fec.q
+plot(tot.fec)
+
+#is treatment significant
+Anova(tot.fec)
+
+#which treatments differ from each other
+marginal = emmeans(tot.fec,~ Treat)
+pairs(marginal, adjust="tukey")
+
+#prediction interval for summary in table
+tot.pred=glm.predict::predicts(tot.fec, "F")
+```
+
+## Longevity
+```{r}
+#longevity is the total number of days an adult lived from capture to death
+longevity=glm(Days.in.Trial ~ Treat, data=exp.adults, family='poisson')
+long.q=glm(Days.in.Trial ~ Treat, data=exp.adults, family='quasipoisson')
+summary(long.q)
+#overdispersed
+
+long.nb=glm.nb(Days.in.Trial ~ Treat, data=exp.adults)
+qAIC(long.nb, dispersion=dfun(long.nb), nobs=nrow(exp.adults))
+qAICc(longevity,dispersion=dfun(longevity),nobs=nrow(exp.adults))
+#quasipoisson performing better than glm.nb
+
+longevity=long.q
+plot(longevity)
+#treatment significant
+Anova(longevity)
+
+#which treatments differ
+marginal = emmeans(longevity,~ Treat)
+pairs(marginal, adjust="tukey")
+
+#prediction interval for summary in table, means are used in population model
+lfspn.pred=glm.predict::predicts(longevity, "F",type="bootstrap",conf.int = 0.95,doPar=TRUE,sim.count=1000)
+```
+
+## Daily Fecundity
+```{r}
+#Poisson
+daily.fec.init=glmer(Total.eggs ~ Treat*Day + (1 | Indi), data=laid.eggs, family='poisson')
+#test for overdispersion (see intro.)
+overdisp_fun(daily.fec.init)
+
+#logistic Poisson
+laid.eggs$ID.egg=rownames(laid.eggs)
+daily.fec.logPoi=glmer(Total.eggs ~ Treat*Day + (1 | Indi)+ (1|ID.egg), data=laid.eggs, family='poisson', control = glmerControl(optimizer = "bobyqa"))
+overdisp_fun(daily.fec)
+
+#Negative Binomial
+daily.fec.nb=glmer.nb(Total.eggs ~ Treat*Day + (1 | Indi), data=laid.eggs)
+overdisp_fun(daily.fec.nb)
+
+#model comparison
+AIC(daily.fec.logPoi)
+AIC(daily.fec.nb)
+
+#selected negative binomial
+daily.fec=daily.fec.nb
+
+#evaluate fit
+plot(daily.fec,residuals(.) ~log(fitted(.)))
+plot(daily.fec,Indi~resid(.,type="pearson"))
+
+#significant model coefficients
+Anova(daily.fec)
+
+#significant treatment differences
+#must be by day based on model structure
+em.day.fec=emmeans(daily.fec,~Treat|Day, at=list(Day=exp.days1),type="response")
+pwpm(em.day.fec)
+plot(em.day.fec,comparisons = TRUE)
+```
+
+This code will take a while as it is creating the prediction interval for the data visualization of daily fecundity. The prediction interval mean is also used in the population model.
+
+```{r}
+treats=unique(laid.eggs$Treat)
+Treat=rep(treats,max(exp.adults$Days.in.Trial))
+Day=sort(rep(c(1:max(exp.adults$Days.in.Trial)),length(treats)))
+day.fec.pred=data.frame(Treat,Day)
+
+#get the predicted mean daily egg lay across all individuals by
+#treatment using bootpredictlme4
+#his will be time consuming
+
+PR=predict(daily.fec,newdata=day.fec.pred,re.form=NA,se.fit=TRUE,nsim=1000,type="response")
+
+#putting results into data frame
+day.fec.pred$DailyEgg=PR$fit
+ci.pred=t(PR$ci.fit)
+day.fec.pred$lower=ci.pred[,1]
+day.fec.pred$upper=ci.pred[,2]
+day.fec.pred$se.boot=PR$se.boot
+day.fec.pred$Treat=as.character(day.fec.pred$Treat)
+
+#Removing the predictions for the days after which 97.5% of butterflies would have died as estimated in the longevity model prediction
+day.results=data.frame()
+treats=as.vector(unique(day.fec.pred$Treat))
+
+for(ea.treat in 1:length(treats)){
+  cur.treat=treats[ea.treat]
+  cur.dat=day.fec.pred[day.fec.pred$Treat==cur.treat,]
+  cur.lfspn=lfspn.pred[lfspn.pred$Treat==cur.treat,]
+  comp.res= cur.dat[!(cur.dat$Day > ceiling(cur.lfspn$upper)),]
+  day.results=rbind(day.results,comp.res)
+}
+```
+
+Plotting the prediction interval for this experiment, will be placed alongside the other treatment later.
+
+```{r}
+#making the results into a figure
+fig.df=ggplot(aes(Day,DailyEgg,fill=Treat),data=day.results)+geom_errorbar(aes(ymin=lower,ymax=upper), linewidth=0.5,width=0,position = position_dodge(width=1), color="gray40")+
+  geom_point(size=3,shape=21,position=position_dodge(width=1))+
+  scale_fill_manual(name="", breaks=t.names, values=t.colors, labels=function(x)stringr::str_wrap(t.labs,8))+scale_color_manual(name="", breaks=t.names, values=t.colors, guide="none")+
+  #theme components
+  xlab("")+ylab("")+theme_pubr(base_size = 14)+ylim(0,60)+xlim(0,26)+ theme(legend.position = c(0.75, .72), legend.background = element_blank(),legend.text=element_text(size=11),axis.line.x.bottom=element_line(linewidth =1),axis.line.y.left=element_line(linewidth =1),axis.ticks=element_line(linewidth=1), plot.margin = margin(t = 0,r = 0,b = 0,  l = 2)) +labs(x = NULL, y=NULL)+ annotate("text", x = 26, y = 60, label = "a", size=6)
+#check figure
+fig.df
+
+```
+
+## Unlaid Eggs
+```{r}
+dissect.mod=glm(Lost.Fecundity~Treat, data=dissect, family="poisson")
+
+dfun(dissect.mod)
+#overdispersed
+
+dissect.nb=glm.nb(Lost.Fecundity~Treat, data=dissect)
+
+#qAIC from bbmle
+bbmle::qAIC(dissect.nb, dispersion= dfun(dissect.nb), nobs=nrow(dissect))
+#this calculates the AIC of the quasipoisson, given the Poisson model and its overdispersion
+bbmle::qAIC(dissect.mod,dispersion=dfun(dissect.mod),nobs=nrow(dissect))
+
+#quasipoisson perform better than glm.nb
+dissect.modq=glm(Lost.Fecundity~Treat, data=dissect, family="quasipoisson")
+plot(dissect.mod)
+
+#treatment significant
+Anova(dissect.mod)
+
+#which treatments differ
+em.dissect=emmeans(dissect.mod,~Treat,type="response")
+pairs(em.dissect)
+plot(em.dissect,comparisons = TRUE)
+
+#prediction interval for tabel
+lost.pred=glm.predict::predicts(dissect.mod, "F")
+
+```
+
+## Weight
+
+```{r}
+hist(weight$Wt)
+#normal distribution
+weight.mod=lmer(Wt~Day*Treat +(1 | Indi), data=weight)
+summary(weight.mod)
+
+plot(weight.mod,residuals(.) ~log(fitted(.)))
+
+#coefficient significance
+Anova(weight.mod)
+
+#which treatments vary and when
+#day is required because of the structure of the model
+em.weight=emmeans(weight.mod,~Treat|Day, at=list(Day=exp.days2),type="response")
+pwpm(em.weight)
+plot(em.weight,comparisons = TRUE)
+
+```
+
+## Table Part 1
+Creating a table for prediction intervals.
+```{r}
+longevity=vector()
+for(each in 1:length(t.labs)){
+  cur.dat=lfspn.pred[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  longevity[each]=pasted
+}
+
+total.fec=vector()
+for(each in 1:length(t.labs)){
+  cur.dat=tot.pred[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  total.fec[each]=pasted
+}
+
+lost.vals=vector()
+for(each in 1:length(t.labs)){
+  cur.dat=lost.pred[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  lost.vals[each]=pasted}
+
+nect.nut=matrix(c(total.fec,longevity,lost.vals), ncol = 3,byrow=F)
+
+
+rownames(nect.nut)=t.labs
+colnames(nect.nut)=c("Fecundity (95% CI)", "Longevity (95% CI)", paste("Unlaid Eggs","(95% CI)"))
+
+knitr::kable(nect.nut)
+```
+
+
+# Sugar and Amino Acid Experiment
+Model selection underwent the same process, but for the purposes of not repeating code is not done here.
+```{r}
+#loading data and removing individuals that did not meet criteria
+laid.eggs.sAA=read.csv("./DailyFec2020.csv",stringsAsFactors = TRUE)
+exp.adults.sAA=read.csv("./Adults2020.csv",stringsAsFactors = TRUE)
+weight.sAA=read.csv("./Weight2020.csv",stringsAsFactors = TRUE)
+dissect.sAA=read.csv("./Dissect2020.csv",stringsAsFactors = TRUE)
+
+#removing individuals see methods for details
+exp.adults.sAA=exp.adults.sAA[!(exp.adults.sAA$Indi=="L02"|exp.adults.sAA$Indi=="L08"),]
+laid.eggs.sAA=laid.eggs.sAA[!(laid.eggs.sAA$Indi=="L02"|laid.eggs.sAA$Indi=="L08"),]
+weight.sAA=weight.sAA[!(weight.sAA$Indi=="L02"|weight.sAA$Indi=="L08"),]
+dissect.sAA=dissect.sAA[!(dissect.sAA$Indi=="L02"|dissect.sAA$Indi=="L08"),]
+
+#title for saving figures and days of interest in weight data
+exp.title.sAA=c("SugarAminoAcids")
+exp.days1.sAA=c(1,10,18)
+exp.days2.sAA=c(1,14,15,28)
+t.names.sAA=c("B","F", "L", "W")
+t.colors.sAA=c("#27eb5a","#ebbc27","#eb27b8","#2756eb")
+t.labs.sAA= c("Flower & Lupine", 'Flower',"Lupine", 'Water Only')
+```
+
+## Total Fecundity
+```{r}
+#model
+tot.fec.sAA=glm(Total.Fecundity ~ Treat, data=exp.adults.sAA, family="quasipoisson")
+summary(tot.fec.sAA)
+plot(tot.fec.sAA)
+
+#treatment effects
+Anova(tot.fec.sAA)
+marginal = emmeans(tot.fec.sAA,~ Treat)
+pairs(marginal, adjust="tukey")
+
+#prediction interval
+tot.pred.sAA=glm.predict::predicts(tot.fec.sAA, "F")
+
+```
+## Longevity
+```{r}
+#model
+longevity.sAA=glm(Days.in.Trial ~ Treat, data=exp.adults.sAA, family='quasipoisson')
+summary(longevity.sAA)
+plot(longevity.sAA)
+
+#treatment effects
+Anova(longevity.sAA)
+marginal = emmeans(longevity.sAA,~ Treat)
+pairs(marginal, adjust="tukey")
+
+#prediction interval
+lfspn.pred.sAA=glm.predict::predicts(longevity.sAA, "F",type="bootstrap",conf.int = 0.95,doPar=TRUE,sim.count=1000)
+```
+
+## Daily Fecundity
+```{r}
+#model
+daily.fec.nb=glmer.nb(Total.eggs ~ Treat*Day + (1 | Indi), data=laid.eggs.sAA)
+overdisp_fun(daily.fec.nb)
+
+daily.fec.sAA=daily.fec.nb
+plot(daily.fec.sAA,residuals(.) ~log(fitted(.)))
+plot(daily.fec.sAA,Indi~resid(.,type="pearson"))
+
+#treatment effects
+Anova(daily.fec.sAA)
+em.day.fec=emmeans(daily.fec.sAA,~Treat|Day, at=list(Day=exp.days1.sAA),type="response")
+pwpm(em.day.fec)
+plot(em.day.fec,comparisons = TRUE)
+```
+
+This code will take a while as it is creating the prediction interval for the data visualization of daily fecundity. The prediction interval mean is also used in the population model.
+```{r}
+treats.sAA=unique(laid.eggs.sAA$Treat)
+Treat=rep(treats.sAA,max(exp.adults.sAA$Days.in.Trial))
+Day=sort(rep(c(1:max(exp.adults.sAA$Days.in.Trial)),length(treats.sAA)))
+day.fec.pred.sAA=data.frame(Treat,Day)
+
+#get the predicted mean daily egg lay across all individuals by
+#treatment using bootpredictlme4
+PR.sAA=predict(daily.fec.sAA,newdata=day.fec.pred.sAA,re.form=NA,se.fit=TRUE,nsim=1000,type="response")
+
+#putting results into data frame
+day.fec.pred.sAA$DailyEgg=PR.sAA$fit
+ci.pred=t(PR.sAA$ci.fit)
+day.fec.pred.sAA$lower=ci.pred[,1]
+day.fec.pred.sAA$upper=ci.pred[,2]
+day.fec.pred.sAA$se.boot=PR.sAA$se.boot
+day.fec.pred.sAA$Treat=as.character(day.fec.pred.sAA$Treat)
+
+#Removing the predictions for the days after which 97.5% of butterflies would have died as estimated in the longevity model prediction
+day.results.sAA=data.frame()
+for(ea.treat in 1:length(treats.sAA)){
+  cur.treat=as.character(treats.sAA)[ea.treat]
+  cur.dat=day.fec.pred.sAA[day.fec.pred.sAA$Treat==cur.treat,]
+  cur.lfspn=lfspn.pred.sAA[lfspn.pred.sAA$Treat==cur.treat,]
+  comp.res= cur.dat[!(cur.dat$Day > ceiling(cur.lfspn$upper)),]
+  day.results.sAA= rbind(day.results.sAA,comp.res)}
+```
+
+
+```{r}
+#making the results into a figure and saving it.
+fig.df.sAA=ggplot(aes(Day,DailyEgg,fill=Treat),data=day.results.sAA)+geom_errorbar(aes(ymin=lower,ymax=upper), linewidth=0.5,width=0,position = position_dodge(width=1), color="gray40")+
+  geom_point(size=3,shape=21,position=position_dodge(width=1))+ scale_fill_manual(name="", breaks=t.names.sAA, values=t.colors.sAA, labels=function(x)stringr::str_wrap(t.labs.sAA,8))+scale_color_manual(name="", breaks=t.names.sAA, values= t.colors.sAA, guide= "none")+theme_pubr(base_size = 14)+ylim(0,60)+xlim(0,26)+ theme(axis.line.x.bottom= element_line(linewidth =1), axis.line.y.left= element_line(linewidth =1), legend.position = c(0.75, .7), legend.background= element_blank(),legend.text= element_text(size = 11),axis.ticks= element_line(linewidth = 1), plot.margin = margin(t = 0,r = 0,b = 0,  l = 2)) +labs(x = NULL, y=NULL)+ annotate("text", x = 26, y = 60, label = "b", size=6)
+
+fig.df.sAA
+
+fig=ggarrange(fig.df, fig.df.sAA + rremove("y.text"), ncol = 2, nrow = 1, widths =3.75, heights=3.4)
+fig=annotate_figure(fig, left = textGrob("Eggs Laid", rot = 90, gp = gpar(cex = 1.3)),bottom = textGrob("Day", gp = gpar(cex = 1.3)))
+
+fig
+ggsave("Fig1.eps", dpi=600, height=3.4, width=7.5)
+ggsave("Fig1.jpeg", dpi=600, height=3.4, width=7.5)
+```
+
+## Unlaid Eggs
+```{r}
+#model
+dissect.sAA.mod=glm(Lost.Fecundity~Treat, data=dissect.sAA, family="quasipoisson")
+summary(dissect.sAA.mod)
+plot(dissect.sAA.mod)
+
+#treatment effects
+Anova(dissect.sAA.mod)
+em.dissect.sAA=emmeans(dissect.sAA.mod,~Treat,type="response")
+pairs(em.dissect.sAA)
+plot(em.dissect.sAA,comparisons = TRUE)
+
+#prediction interval
+lost.pred.sAA=glm.predict::predicts(dissect.sAA.mod, "F")
+```
+
+
+
+## Weight
+```{r}
+#model
+weight.sAA.mod=lmer(Wt~Day*Treat +(1 | Indi), data=weight.sAA)
+summary(weight.sAA.mod)
+plot(weight.sAA.mod,residuals(.) ~log(fitted(.)))
+
+#treatment effects
+Anova(weight.sAA.mod)
+em.weight.sAA=emmeans(weight.sAA.mod,~Treat|Day, at=list(Day=exp.days2.sAA),type="response")
+pwpm(em.weight.sAA)
+plot(em.weight.sAA,comparisons = TRUE)
+```
+
+## Table Part 2
+Pulling all the prediction intervals into a table for data visualization.
+```{r}
+longevity=vector()
+for(each in 1:length(t.labs.sAA)){
+  cur.dat=lfspn.pred.sAA[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  longevity[each]=pasted
+}
+
+total.fec=vector()
+for(each in 1:length(t.labs.sAA)){
+  cur.dat=tot.pred.sAA[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  total.fec[each]=pasted
+}
+
+lost.vals=vector()
+for(each in 1:length(t.labs.sAA)){
+  cur.dat=lost.pred.sAA[each,]
+  pasted=paste0(round(cur.dat$mean,0)," (", round(cur.dat$lower,0),", ",round(cur.dat$upper,0),")")
+  lost.vals[each]=pasted}
+  
+nect.nut2=matrix(c(total.fec,longevity,lost.vals), ncol = 3,byrow=F)
+
+rownames(nect.nut2)=t.labs.sAA
+colnames(nect.nut2)=c("Fecundity (95% CI)", "Longevity (95% CI)", paste("Unlaid Eggs","(95% CI)"))
+
+nect.nut.comp=rbind(nect.nut,nect.nut2)
+knitr::kable(nect.nut.comp)
+```
+
+# Population Model
+
+## Parameters
+```{r}
+sims=10000 #number of simulations
+
+surv.published=c(
+  #Estimating overwintering survival constant (egg to post-diapause larvae)
+#all estimates are from baseline management (annual mowing)
+
+#Schultz and Crone 1998 one site one year
+0.094, 
+
+#Warchola et al. 2017 
+0.013,0.021,0.021, 
+#three years one site
+
+# Schultz and Ferguson 2020
+#egg to post-diapause for plots with >=25 eggs monitored (removed Hayfield, Main, North 2018)
+#average for 9 sites across 2014-2018 n=42
+0.029471822, 0.016504997,
+0.015288148,0.012745439,
+0.062705746,0.036459305,
+0.058690404,0.01164928,
+0.050309215,0.081929126,
+0.020733541,0.019521844,
+0.004065041,0.011091821,
+0.021978022,0.012806637,
+0.058170996,0.024644946,
+0.017424242,0.166666667,
+0.02605042,0.005952381,
+0.018650794,0.036910458,
+0.01010101,0.01,0.007142857,
+0.005952381,0,0.020408163,
+0.09,0.010416667,0.014285714,
+0,0.063737374,0.008333333,0.005952381,
+0,0,0.0259914,0,0.006944444) 
+
+surv.est=mean(surv.published)
+#estimate is constant
+
+
+```
+
+## Simulation
+> In this simulation of population growth, we work at the population
+> level. We assume that our estimate of longevity and daily fecundity
+> represent the average of the population. We estimate longevity and
+> daily fecundity annually to get a stochastic fecundity for that year.
+> Additionally, we include annual environmental stochasticity to get a
+> more realistic range of growth rates.
+
+```{r}
+####Simulation####
+
+#automatic adjusting of the rnbinom function for a quasi poisson
+rqpois <- function(n, mu, theta) {
+  rnbinom(n = n, mu = mu, size = mu/(theta-1))
+}
+
+#where the final results will be put
+pop.bind1=data.frame()
+pop.bind2=data.frame() #where the results will be put
+
+#Experiment loop
+for(ea.dat in 1:2){
+#which experiment
+if(ea.dat==1){
+#sugar
+  treats=c("W", "A", "R")
+  theta.day=lme4:::getNBdisp(daily.fec)
+  theta=dfun(longevity)
+  lfspn.par=lfspn.pred[,c(1,4)]
+  parm.data=merge(day.results[,c(1:3,6)],lfspn.par, by.x="Treat",by.y = "Treat")
+  colnames(parm.data)=c("Treat","Day","dailyEgg","egg.se","daysAlive")
+} else{
+#Sugar and amino acids
+  treats=as.character(treats.sAA)
+  theta.day=lme4:::getNBdisp(daily.fec.sAA)
+  theta=dfun(longevity)
+  lfspn.par=lfspn.pred.sAA[,c(1,4)]
+  parm.data=merge(day.results.sAA[,c(1:3,6)],lfspn.par, by.x="Treat",by.y = "Treat")
+  colnames(parm.data)=c("Treat","Day","dailyEgg","egg.se","daysAlive")}
+  
+pop.bind=data.frame()
+#treatment loop
+for(ea.treat in 1:length(treats)){
+  cur.treat=treats[ea.treat]
+  cur.parm=parm.data[parm.data$Treat==cur.treat,]
+  lam=rep("NA",sims)
+#Simulation loop, repeating calculation across variation
+for (ea.sim in 1:sims){
+  #randomly estimate the average annual adult longevity parameter from the longevity model
+  cur.lfspn=rqpois(1,cur.parm$daysAlive[1], theta)
+  #adjust if lifespan is less than 1.
+  if(cur.lfspn<1){days=1}else{days=round(cur.lfspn,0)}
+  if(days>max(cur.parm$Day)){days=max(cur.parm$Day)}
+  #fecundity matrix for each day alive 
+  cur.fec=matrix(nrow=days,ncol=2)
+  
+#randomly estimate the average annual daily fecundity by the age (in days) of butterflies from the daily fecundity model
+  #daily loop, length dependent on lifespan
+for(ea.day in 1:days){
+  number=vector()
+  cur.day.parm=cur.parm[cur.parm$Day==paste(ea.day),]
+  fec.day=cur.day.parm[,3]
+  cur.fec[ea.day,1]=ea.day
+  number=rnbinom(n=1, mu=fec.day, size=fec.day/(theta.day-1))
+  #adjust if we get a bad random number
+  if(is.na(number)|number<1){number=fec.day}else {number}
+  cur.fec[ea.day,2]=number
+}
+  
+#sum daily fecundity to get average population annual fecundity
+fecundity=sum(cur.fec[,2])
+  
+#####Population simulation math#####
+  lam[ea.sim]=fecundity*(1/2)*surv.est
+#Population size is the result of the fecundity times the population size in the previous year, minus those individuals that died before reaching adulthood given the environmental variation.
+  
+  }#close simulations and move to next treatment
+  #results dataset
+  sim=c(1:sims)
+  Treat=c(rep(cur.treat,sims))
+  pop.matrix=data.frame(cbind(lam,sim,Treat))
+  pop.bind=rbind(pop.bind,pop.matrix)
+
+  #put the results into the dataset
+  #start the next simulation
+  }#close treatment and loop
+if(ea.dat==1){
+  #place data in each experiment dataset
+  pop.bind1=pop.bind}else{
+    pop.bind2=pop.bind}
+}
+#formatting the results
+pop.bind1$lam=as.numeric(pop.bind1$lam)
+pop.bind1$Treat=as.factor(pop.bind1$Treat)
+pop.bind1$sim=as.factor(pop.bind1$sim)
+pop.bind1$lam[is.nan(pop.bind1$lam)]=NA
+pop.bind1=pop.bind1[!is.na(pop.bind1$lam),]
+
+pop.bind2$lam=as.numeric(pop.bind2$lam)
+pop.bind2$Treat=as.factor(pop.bind2$Treat)
+pop.bind2$sim=as.factor(pop.bind2$sim)
+pop.bind2$lam[is.nan(pop.bind2$lam)]=NA
+pop.bind2=pop.bind2[!is.na(pop.bind2$lam),]
+
+```
+## Results
+```{r}
+#calculate the confidence interval for the lambdas
+for(ea.dat in 1:2){
+  #each experiment
+  if(ea.dat==1){treats=c("W", "A", "R")
+  pop.dat=pop.bind1}else{
+    treats=treats.sAA
+    pop.dat=pop.bind2}
+  lam.res=data.frame()
+for(ea.treat in 1:length(treats)){
+  #each treatment in that experiment
+  cur.treat=treats[ea.treat]
+  cur.dat=pop.dat[pop.dat$Treat==cur.treat,]
+  lower=mean(cur.dat$lam)-1.96*sd(cur.dat$lam)
+  upper=mean(cur.dat$lam)+1.96*sd(cur.dat$lam)
+   if(lower<0){lower=0}
+  Treat=paste(cur.treat)
+  est=mean(cur.dat$lam)
+  comp.res=data.frame(cbind(Treat,est,lower,upper))
+  lam.res=rbind(lam.res,comp.res)
+}
+if(ea.dat==1){
+  #place in the dataset's correct df
+  lam.results=lam.res
+}else{
+  lam2.results=lam.res}
+}
+
+#format each df
+colnames(lam.results)=c("Treatment","mean","lower", "upper")
+lam.results$mean=as.numeric(lam.results$mean)  
+lam.results$upper=as.numeric(lam.results$upper)
+lam.results$lower=as.numeric(lam.results$lower)
+lam.results$Treat=as.factor(lam.results$Treat)
+
+colnames(lam2.results)=c("Treatment","mean","lower", "upper")
+lam2.results$mean=as.numeric(lam2.results$mean)
+lam2.results$upper= as.numeric(lam2.results$upper)
+lam2.results$lower= as.numeric(lam2.results$lower)
+lam2.results$Treat= as.factor(lam2.results$Treat)
+```
+
+```{r}
+#data visualization
+fig=ggplot(aes(Treat,mean),data=lam.results)+ geom_errorbar(aes(ymin=lower,ymax=upper),data=lam.results, width=0,linewidth=0.5) +  geom_point(size=3.5,shape=21,aes(fill=Treat),data=lam.results)+geom_hline(yintercept =1,linewidth=0.7)+ scale_fill_manual(name="Treatment", values=t.colors,breaks=t.names,labels = t.labs)+ geom_hline(yintercept=1.55,color="gray2",linetype=2,linewidth=0.7)+ylab(expression(lambda))+xlab("Treatment") + ylim(0,5)+scale_x_discrete(labels=function(x)stringr::str_wrap(t.labs,8))+ theme_pubr(base_size=14) +theme(legend.position = "none")+ annotate("text", x = 3.4, y = 5, label = "a", size=6)+
+  theme(axis.line.x.bottom= element_line(linewidth =1), axis.line.y.left= element_line(linewidth =1), legend.background= element_blank(),axis.text.x=element_text(size = 11),axis.ticks= element_line(linewidth = 1), plot.margin = margin(t = 0,r = 0,b = 0,  l = 2)) +labs(x = NULL, y=NULL)
+
+fig2=ggplot(aes(Treat,mean),data=lam2.results)+ 
+  geom_errorbar(aes(ymin=lower,ymax=upper),data=lam2.results, width=0,linewidth=0.5) +  
+  geom_point(size=3.5,shape=21,aes(fill=Treat),data=lam2.results)+
+  geom_hline(yintercept =1,linewidth=0.7)+ 
+  scale_fill_manual(name="Treatment", values=t.colors.sAA,breaks=t.names.sAA,labels = t.labs.sAA)+ 
+  geom_hline(yintercept=1.55,color="gray2",linetype=2,linewidth=0.7)+ ylim(0,5)+
+  scale_x_discrete(labels=function(x)stringr::str_wrap(t.labs.sAA,8))+ 
+  theme_pubr(base_size=14) +
+  theme(legend.position = "none")+
+  annotate("text", x = 4.2, y = 5, label = "b", size=6)+
+  theme(axis.line.x.bottom= element_line(linewidth =1), axis.line.y.left= element_line(linewidth =1), legend.background= element_blank(),axis.text.x = element_text(size = 11),axis.ticks= element_line(linewidth = 1), plot.margin = margin(t = 0,r = 0,b = 0,  l = 2)) +labs(x = NULL, y=NULL)
+#put the two figures together
+figure=ggarrange(fig, fig2 + rremove("y.text"), ncol = 2, nrow = 1, widths = c(2.25, 2.75), heights=3)
+figure=annotate_figure(figure, left = textGrob(expression(lambda), rot = 0, gp = gpar(cex = 1.75), vjust=-1),bottom = textGrob("Treatment", gp = gpar(cex = 1.3)))
+#check figure
+figure
+#save figure
+ggsave("Fig2.eps", figure, dpi=600, height=3, width=5)
+ggsave("Fig2.jpeg", figure, dpi=600, height=3, width=5)
+```
+## Model Sensitivity
+```{r}
+#to get lambda 1.55 fecundity must be greater than
+(1.55)/(surv.est*1/2)
+#to get lambda 1 fecundity must be greater than
+(1)/(surv.est*1/2)
+
+#average water fec
+w.sAA=34
+w.sugar=68
+
+#to get lambda 1.55 at avg water fecundity
+(1.55*adults)/(w.sugar*(adults/2))
+(1.55*adults)/(w.sAA*(adults/2))
+
+#to get lambda 1 at avg water fecundity
+(1*adults)/(w.sugar*(adults/2))
+(1*adults)/(w.sAA*(adults/2))
+
+#proportion of years where water fecundity could reach 1.55
+length(surv.published[surv.published>(1.55*adults)/(w.sugar*(adults/2))])/ length(surv.published)
+
+#proportion of years where water fecundity could reach 1
+length(surv.published[surv.published>(1*adults)/(w.sugar*(adults/2))])/ length(surv.published)
+
+```
+
+Evaluating the sensitivity of the model to fecundity and larval survival. Given a certain fecundity, what is the larval survival required to be to get to the target population growth rates?
+
+```{r}
+#range of immature survivals
+surv1.loop=seq(0.01,.1,0.005)
+fec.155=vector()
+#loop to calculate
+for(each in 1:length(surv1.loop)){
+  cur.s1=surv1.loop[each]
+  fec=1.55/(1/2*cur.s1)
+  fec.155[each]=fec
+}
+#visualize
+fig=ggplot()+geom_line(aes(x=surv1.loop*100, y=fec.155))+xlab("Immature Survival (%)")+ ylab("Total Fecundity")+ geom_vline(xintercept=surv.est*100, color='grey40', lty=2, linewidth=1) +theme_pubr(base_size = 14)+ theme(axis.line.x.bottom= element_line(linewidth =1), axis.line.y.left= element_line(linewidth =1), axis.ticks= element_line(linewidth = 1), plot.margin = margin(t = 0,r = 5,b = 0,  l = 2))
+#check figure
+fig
+#save figure
+ggsave("Fig3.jpeg", fig, dpi = 600, height=3.4, width=3.4)
+ggsave("Fig3.eps", fig, dpi = 600, height=3.4, width=3.4)
+```
+# References
+
+Schultz CB, Crone EE (1998) Burning prairie to restore butterfly habitat: a modeling approach to management tradeoffs for the Fender’s blue. Restoration Ecology 6:244–252
+
+Schultz CB, Ferguson JA (2020) Demographic costs and benefits of herbicide‐based restoration to enhance habitat for an endangered butterfly and a threatened plant. Restor Ecol 28:564--572. https://doi.org/10.1111/rec.13102
+
+Warchola N, Crone EE, Schultz CB (2017) Balancing ecological costs and benefits of fire for population viability of disturbance-dependent butterflies. J Appl Ecol 55:800--809. https://doi.org/10.1111/1365-2664.12983

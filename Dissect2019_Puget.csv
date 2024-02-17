@@ -1,0 +1,33 @@
+Treat,ID,Indi,Death Date,Dissect Date,Mature Eggs,Undev. Eggs,Degraded Eggs,Notes,Total Fecundity,Potential Fecundity,Lost Fecundity
+A,1,A1,5-Jun,43621,35,12,4,9 AM DEATH VERY FATTY 4 MATURE DEGRADED,257,304,47
+A,2,A2,17-Jun,43633,45,9,2,"1 pm death, booper clogged. Popped two mature",598,652,54
+A,3,A3,5-Jun,43621,52,10,0,9 am death. Very gooey and watery.,65,127,62
+A,4,A4,4-Jan,43641,17,0,0,"5 pm death, two mature eggs were very white",231,248,17
+A,5,A5,2-Jun,43620,0,0,0,DROP,0,0,0
+A,6,A6,16-Jun,43633,16,8,16,"no green, 5 pm death, very watery",351,375,24
+A,7,A7,12-Jun,43628,3,17,3,3 MATURE DEGRADED NOT GREEN? 10 AM DEATH,167,187,20
+A,8,A8,16-Jun,43633,42,0,0,no green 5 pm death,257,299,42
+A,9,A9,10-Jun,43626,NA,NA,NA,Not able to dissect due to large cyst or fiborous mass,94,NA,NA
+A,10,A10,18-Jun,43634,104,14,14,"10 am death, undev degraded",69,187,118
+A,11,A11,21-Jun,43638,78,16,6,"1 pm death, 6 mature degraded",60,154,94
+A,12,A12,15-Jun,43631,53,0,0,10 AM DEATH,109,162,53
+R,1,R1,9-Jun,43626,47,0,0,5 pm death,95,142,47
+R,2,R2,10-Jun,43627,22,1,0,5 pm death,310,333,23
+R,3,R3,11-Jun,43628,49,0,3,12 pm death 3 popped by me,201,250,49
+R,4,R4,43626,43626,20,43,0,12 pm death,276,339,63
+R,5,R5,43637,43638,26,16,7,"5 pm death, 4 undev degraded, 3 mature degraded",446,488,42
+R,6,R6,43632,43633,23,2,4,"4 eggs popped by me, no green 5 pm death",538,563,25
+R,7,R7,43621,43621,45,42,0,11 am death,47,134,87
+R,8,R8,43626,43626,57,25,3,21 pm death 3 undeveloped degraded,27,109,82
+R,9,R9,43640,43640,29,7,11,"1 pm death, 4 mature degraded, 7 undev degraded",443,479,36
+R,10,R10,43651,43652,2,0,2,2 mature degraded,452,454,2
+W,1,W1,43620,43621,37,11,5,5 pm death 3 mature degraded,134,182,48
+W,2,W2,43620,43620,45,38,4,"degraded 2 mature, 2 undeveloped. Eve of 6/3 death or morning of 6/4",46,129,83
+W,3,W3,43620,43621,48,47,9,5 pm death 5 mature degraded and 4 undev degraded,111,206,95
+W,4,W4,43620,43621,24,26,1,1 pm death mature degraded,32,82,50
+W,5,W5,43620,43620,106,21,2,"1 p.m. death, 2 mature eggs degraded. Spermatophore still present in female",63,190,127
+W,6,W6,43626,43627,60,6,2,2 mature degraded 5 pm death,60,126,66
+W,7,W7,43625,43625,41,19,4,mature degraded 10 am death,115,175,60
+W,8,W8,43623,43623,107,44,13,"5 pm death, 13 degraded undeveloped",4,155,151
+W,9,W9,43629,43630,94,20,10,"5 pm death, 10 undev degraded",25,139,114
+W,10,W10,43632,43633,4,92,23,"2 mature degraded, 21 undev degraded. 5 pm death",61,157,96
